@@ -74,28 +74,6 @@ const createDomain = async (req, res) => {
         return res.json({ message: "Both file and image are required" });
       }
 
-      // Check if all required fields are provided
-      if (!title || title.trim() === "") {
-        return res.json({
-          status: "failed",
-          message: "title field should not be empty or null.",
-        });
-      }
-
-      if (!url || url.trim() === "") {
-        return res.json({
-          status: "failed",
-          message: "url field should not be empty or null.",
-        });
-      }
-
-      if (!description || description.trim() === "") {
-        return res.json({
-          status: "failed",
-          message: "description field should not be empty or null.",
-        });
-      }
-
       // Connect to MongoDB and check if domain already exists
       const mongo = connection.getDB();
       const domainsCollection = mongo.collection("domains");
