@@ -2,7 +2,6 @@ const multer = require("multer");
 const path = require("path");
 const connection = require("../utility/connection"); // Ensure your DB connection logic is correct
 const fs = require("fs");
-const { timeLog, error } = require("console");
 
 // Make sure the 'uploads' directory exists
 const dir = "./uploads";
@@ -106,7 +105,6 @@ const createDomain = async (req, res) => {
         message: "Domain created successfully.",
       });
     } catch (error) {
-      console.error("Error in file upload and database insertion:", error);
       return res.json({ message: "Server error", error: error.message });
     }
   });
@@ -136,17 +134,14 @@ const getAllDomains = async (req, res) => {
   const domainsCollection = mongoDB.collection("domains");
   const domainDocs = await domainsCollection.find({});
   const domArray = await domainDocs.toArray();
-  const domains = domArray.map((domain) => {
-    return { ...domain };
-  });
 
-  if (!domains) {
+  if (!domArray) {
     return res.json({
       status: "failed",
       message: "No domains found with the given id.",
     });
   }
-  return res.json({ domains: domains });
+  return res.json({ domains: domArray });
 };
 
 //delete a domain
@@ -256,47 +251,45 @@ const deleteFiles = async (paths) => {
 
 //update domain
 const updateDomain = async (req, res) => {
-  // Use upload middleware to handle the files for this specific route
   upload.fields([
     { name: "file", maxCount: 1 },
     { name: "image", maxCount: 1 },
   ])(req, res, async (err) => {
     if (err) {
       return res.json({
+        status: "failed",
         message: "Error during file upload.",
         error: err.message,
       });
     }
 
     try {
-      // Access uploaded files and form fields
       const { file, image } = req.files;
-      const {id, title, url, description } = req.body;
+      const { id, title, url, description } = req.body;
 
-      // Check if id is provided for update
       if (!id) {
-        console.log("id is missing, cannot update domain.");
-        return res.json({ message: "id is required to update the domain." });
+        return res.json({
+          status: "failed",
+          message: "id is required to update the domain.",
+        });
       }
 
-      // Connect to MongoDB and fetch the existing domain
       const mongo = connection.getDB();
       const domainsCollection = mongo.collection("domains");
-      const domain = await domainsCollection.findOne({_id: connection.getObjectId(id)});
+      const domain = await domainsCollection.findOne({ _id: connection.getObjectId(id) });
 
       if (!domain) {
-        console.log(`Domain not found with the given id.`);
         return res.json({
           status: "failed",
           message: "Domain not found with the given id.",
         });
       }
 
-      // updated data for the domain
+      // Updated data for the domain
       const updatedData = {
         url: url || domain.url, // Keep the old URL if not updated
         description: description || domain.description, // Keep old description if not updated
-        title: title || domain.title // Keep old title if not updated
+        title: title || domain.title, // Keep old title if not updated
       };
 
       let newFileUploaded = false;
@@ -309,11 +302,8 @@ const updateDomain = async (req, res) => {
 
         // If the file name is the same as the previous file, skip deletion and update
         if (newFileName === oldFileName) {
-          console.log('Uploaded file has the same name as the existing file, skipping update.');
           updatedData.mapperFile_Url = domain.mapperFile_Url; // Keep the old file URL
         } else {
-          console.log('Uploaded file has a different name. Replacing the old file.');
-          // If the file is different, upload the new file before deleting the old one
           updatedData.fileName = newFileName; // New file name
           updatedData.mapperFile_Url = file[0].path; // New file path
           newFileUploaded = true;
@@ -327,28 +317,33 @@ const updateDomain = async (req, res) => {
 
         // If the image name is the same as the previous image, skip deletion and update
         if (newImageName === oldImageName) {
-          console.log('Uploaded image has the same name as the existing image, skipping update.');
           updatedData.imagePath = domain.imagePath; // Keep the old image path
         } else {
-          console.log('Uploaded image has a different name. Replacing the old image.');
-          // If the image is different, upload the new image before deleting the old one
           updatedData.imagePath = image[0].path; // New image path
           newImageUploaded = true;
         }
       }
 
-      // Only proceed to delete old files after ensuring the new files have been uploaded
+      // delete old files after the new files have been uploaded
       if (newFileUploaded && domain.mapperFile_Url) {
         const oldFilePath = path.join(__dirname, '..', domain.mapperFile_Url);
         if (fs.existsSync(oldFilePath)) {
           try {
-            fs.unlinkSync(oldFilePath); // Delete old file from server
+            fs.unlinkSync(oldFilePath); // Delete old file
             console.log(`Old file deleted: ${domain.mapperFile_Url}`);
           } catch (error) {
-            console.error('Error deleting old file:', error);
+            return res.json({
+              status: "failed",
+              message: "Error deleting old file.",
+              error: error.message,
+            });
           }
         } else {
-          console.log('Old file does not exist:', oldFilePath);
+          return res.json({
+            status: "failed",
+            message: "Old file does not exist.",
+            error: `File at ${oldFilePath} does not exist on the server.`,
+          });
         }
       }
 
@@ -359,18 +354,23 @@ const updateDomain = async (req, res) => {
             fs.unlinkSync(oldImagePath); // Delete old image from server
             console.log(`Old image deleted: ${domain.imagePath}`);
           } catch (error) {
-            console.error('Error deleting old image:', error);
+            return res.json({
+              status: "failed",
+              message: "Error deleting old image.",
+              error: error.message,
+            });
           }
         } else {
-          console.log('Old image does not exist:', oldImagePath);
+          return res.json({
+            status: "failed",
+            message: "Old image does not exist.",
+            error: `Image at ${oldImagePath} does not exist on the server.`,
+          });
         }
       }
 
       // Update the domain in the database
-      console.log('Updating domain in the database with new data...');
-      await domainsCollection.updateOne({ title },{$set: updatedData,}); // Only update the fields provided        
-
-      console.log('Domain updated successfully.');
+      await domainsCollection.updateOne({ title }, { $set: updatedData }); // Only update the fields provided
 
       // Send success response
       return res.json({
@@ -378,8 +378,11 @@ const updateDomain = async (req, res) => {
         message: "Domain updated successfully.",
       });
     } catch (error) {
-      console.error("Error in file upload and database update:", error);
-      return res.json({ message: "Server error", error: error.message });
+      return res.json({
+        status: "failed",
+        message: "Server error",
+        error: error.message,
+      });
     }
   });
 };
@@ -398,7 +401,7 @@ const downloadMapperFile = async (req, res) => {
       return res.json({status:"failed", message: "Domain not found.",});
     }
 
-    // Get the file path for the mapper file from the database
+    // Get the file path from the database
     const filePath = path.join(__dirname, '..', domain.mapperFile_Url);
 
     // Check if the file exists
@@ -413,7 +416,6 @@ const downloadMapperFile = async (req, res) => {
     // Send the file as a download
     res.download(filePath, (err) => {
       if (err) {
-        console.error('Error sending file:', err);
         return res.json({
           status:"failed",
           message: "Error downloading the file.",
@@ -422,7 +424,6 @@ const downloadMapperFile = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Error in file download:", error);
     return res.json({
       status:"failed",
       message: "Server error",
@@ -439,11 +440,11 @@ const renderImage=async (req,res) => {
         const domain = await domainsCollection.findOne({ _id: connection.getObjectId(id) });
     
         if (!domain) {
-          console.log(`Domain not found with given id.`);
-          return res.json({status:"failed", message: "Domain not found.",});
+          console.log("Domain not found with given id.");
+          return res.json({status:"failed", message: "Domain not found with given id.",});
         }
     
-        // Get the file path for the mapper file from the database
+        // Get the image path from the database
         const imagePath = path.join(__dirname, '..', domain.imagePath);
     
         // Check if the file exists
@@ -457,13 +458,12 @@ const renderImage=async (req,res) => {
 
         return res.sendFile(imagePath, (err) => {
           if (err) {
-            console.error('Error rendering the image: ', err);
             return res.json({
               status:"failed",
               message: "Error rendering the image",
             });
           }
-        }); // This will show the image in the browser
+        }); 
       }catch{
         res.json(
           {
@@ -473,4 +473,5 @@ const renderImage=async (req,res) => {
           });
       }    
 }
+
 module.exports = { createDomain, getDomain, getAllDomains, deleteDomain, updateDomain, downloadMapperFile, renderImage };
